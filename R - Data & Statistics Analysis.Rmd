@@ -1,0 +1,263 @@
+
+
+---
+title: "Data Analysis of Profits/Losses Data"
+output: 
+        html_document:
+          df_print: paged
+date: "12/01/2024"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Load required libraries
+library(readxl)
+library(ggplot2)
+library(GGally) 
+library(corrplot)
+library(ellipse)
+library(reshape2)
+library(reticulate)
+options(scipen=5)
+```
+
+## Libaries & Relevant Functions
+
+``` {r}
+library(readxl)
+library(ggplot2)
+library(GGally) 
+library(corrplot)
+library(ellipse)
+library(reticulate)
+library(reshape2)
+```
+
+``` {r}
+# To import excel files into dataframes
+func_import_xls <- function(filename, sheetname) {
+  df <- read_excel(filename, sheet = sheetname)
+  return(df)
+}
+```
+
+``` {r}
+# To check any missing values
+func_check_missing_value <- function(df) {
+  return(df[apply(df, 1, function(x) any(is.na(x))), ])
+}
+```
+
+``` {r}
+# To check any zero values
+func_check_zero_value <- function(df) {
+  zero_rows <- apply(df, 1, function(x) any(x == 0, na.rm = TRUE))
+  return(df[zero_rows & !is.na(rowSums(df)), , drop = FALSE])
+}
+```
+
+## Data Loading
+
+``` {r}
+### Put the excel file into the same directory as this notebook
+# To load the data into dataframes
+file <- 'interview_presentation_data.xlsx'
+tbl_variables <- func_import_xls(file, 'Variables')
+tbl_data <- func_import_xls(file, 'Simulated Data')
+```
+
+``` {r}
+tbl_variables
+```
+
+``` {r}
+tbl_data
+```
+## Data Cleaning
+
+### Renaming column names
+
+``` {r}
+# Create a list of [Variable, Explanation] values
+lst <- data.frame(Variable = tbl_variables$Variable, Explanation = tbl_variables$Explanation)
+lst
+```
+
+``` {r}
+lst <- as.list(lst[-c(1:2), ])  # skip the first two rows
+# Convert the relevant [Variable, Explanation] into a dictionary
+dic <- setNames(lst$Explanation, lst$Variable)
+dic
+
+# Rename the data table column names by corresponding explanation
+colnames(tbl_data)[3:ncol(tbl_data)] <- dic[colnames(tbl_data)[3:ncol(tbl_data)]]
+tbl_data
+```
+
+### Checking dimensions and general statistics
+
+``` {r}
+# See how many unique ID there are
+length(unique(tbl_data$ID))
+unique(tbl_data$ID)
+```
+
+``` {r}
+# See how many unique period there are
+length(unique(tbl_data$period))
+unique(tbl_data$period)
+```
+
+``` {r}
+# Check general statistics and any missing values
+summary(tbl_data)
+```
+
+``` {r}
+# Check any inconsistent data type
+str(tbl_data)
+```
+
+### Checking any missing values
+
+``` {r}
+# Print rows that contain missing values
+func_check_missing_value(tbl_data)
+```
+
+``` {r}
+# Display the data for firm ID 758
+tbl_data[tbl_data$ID == 758, ]
+```
+
+### Checking any zero values
+
+``` {r}
+# Print rows that contain 0 value
+func_check_zero_value(tbl_data)
+```
+
+### Distribution of data points
+``` {r, fig.width=10, fig.height=6}
+# Boxplot for columns 3 and onwards
+
+# Adjust label and text size for x and y axis
+par(cex.lab = 0.7, cex.axis = 0.7, las=1) 
+
+boxplot(tbl_data[, 3:ncol(tbl_data)], main="Distribution of Data Points", ylim=c(-50000, 350000))
+# Manually set y-axis ticks
+axis(2, at = seq(-50000, 350000, 50000))
+grid(nx = NULL, ny = NULL,
+     lty = 1,
+     col = "gray")
+```
+
+## Clean Data
+
+``` {r}
+# Delete the data for firm ID 758 for simpler summarization
+df_analysis <- tbl_data[tbl_data$ID != 758, ]
+df_analysis
+```
+
+``` {r, fig.width=10, fig.height=6}
+# To find out how each metric correlates with each other
+corr <- cor(df_analysis[, 3:ncol(df_analysis)])
+
+# To visualize the correlation coefficients 
+corrplot(corr, method='color', type = 'lower', col.lim = c(0, 1), col=colorRampPalette(c('black','beige'))(100), 
+         tl.srt = 15, addgrid.col = 'white', addCoef.col = "black", # Add coefficient of correlation
+         diag = FALSE) # hide correlation coefficient on the principal diagonal
+```
+
+## Data Summarisation
+
+``` {r}
+# Group data by period and calculate the median for each variable
+medianbyperiod <- aggregate(. ~ period, data = df_analysis[, -1], median)
+medianbyperiod
+```
+
+```{r, fig.width=10, fig.height=6}
+# Plot each variable in a separate plot
+for (i in colnames(medianbyperiod)[-1]) {
+  # Rotate y-axis ticks to horizontal
+  par(las=1)
+  plot(medianbyperiod$period, medianbyperiod[, i], type = 'l', 
+       main = i, xlab = 'Period', ylab = 'Amount (£)', col="blue")
+  # Manually set x-axis ticks
+  axis(1, at = seq(1, 24, by=1))
+  # Add a dashed line if the graph shows negative values
+  if (any(medianbyperiod[, i] < 0)) {
+    abline(h = 0, col = 'red', lty = 2)
+  }
+}
+```
+
+``` {r}
+# Calculate the total pre-tax revenue
+medianbyperiod$`Total pre-tax revenue` <- with(medianbyperiod, 
+                                               `Interest receivable` - `Interest payable` +
+                                               `Fees receivable` - `Fees payable` +
+                                               `Dealing profits/losses` +
+                                               `Operating income` - `Operating expenditure`)
+medianbyperiod
+```
+
+``` {r, fig.width=10, fig.height=6}
+# Plot the total pre-tax revenue
+
+# Rotate y-axis ticks to horizontal
+par(las=1)
+
+plot(medianbyperiod$period, medianbyperiod$`Total pre-tax revenue`, 
+     type = 'l', xlab = 'Period', ylab = 'Amount (£)',
+     main = 'Total pre-tax profits/losses', col="blue")
+# Manually set x-axis ticks
+axis(1, at = seq(1, 24, by=1))
+# Add a dashed line if the graph shows negative values
+abline(h = 0, col = 'red', lty = 2)
+```
+
+## Miscellaneous
+
+``` {r, fig.width=10, fig.height=10}
+# Find the correlations between variables
+
+# Rotate y-axis ticks to horizontal
+par(las=1)
+pairs(tbl_data[, 3:ncol(tbl_data)], pch = 16, cex = 0.5)
+```
+
+``` {r}
+# Check any non-positive values
+tbl_data[rowSums(tbl_data[, c(3, 4, 5, 6, 8, 9)] <= 0, na.rm = TRUE) > 0, ]
+```
+
+``` {r, fig.width=7}
+# Combine two lines into one graph for interest
+
+# Rotate y-axis ticks to horizontal
+par(cex.lab = 0.7, cex.axis = 0.7, las=1) 
+
+plot(medianbyperiod$period, medianbyperiod$`Interest receivable`, type = 'l', 
+     xlab = 'Period', ylab = 'Amount (£)', col = "blue", ylim = c(0, max(medianbyperiod$`Interest receivable`, na.rm = TRUE)))
+lines(medianbyperiod$period, medianbyperiod$`Interest payable`, col = "red")
+# Manually set x-axis ticks
+axis(1, at = seq(1, 24, by=1))
+legend("topleft", legend = c("Interest receivable", "Interest payable"), col = c("blue", "red"), lty = 1)
+```
+
+``` {r}
+# Combine two lines into one graph for fees
+
+# Rotate y-axis ticks to horizontal
+par(cex.lab = 0.7, cex.axis = 0.7, las=1) 
+
+plot(medianbyperiod$period, medianbyperiod$`Fees receivable`, type = 'l', 
+     xlab = 'Period', ylab = 'Amount (£)', col = "blue", ylim = c(0, max(medianbyperiod$`Fees receivable`, na.rm = TRUE)))
+lines(medianbyperiod$period, medianbyperiod$`Fees payable`, col = "red")
+# Manually set x-axis ticks
+axis(1, at = seq(1, 24, by=1))
+legend("bottomright", legend = c("Fees receivable", "Fees payable"), col = c("blue", "red"), lty = 1)
+```
